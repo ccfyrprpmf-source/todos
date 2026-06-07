@@ -125,6 +125,31 @@
   .todo-item:hover .del-btn,.todo-item:hover .restore-btn{opacity:1;}
   .del-btn:hover{color:var(--red);}
   .restore-btn:hover{color:var(--green);}
+  .edit-btn{
+    background:none;border:none;cursor:pointer;color:var(--text3);
+    font-size:13px;padding:0 2px;line-height:1;flex-shrink:0;
+    opacity:0;transition:opacity .15s,color .15s;
+  }
+  .todo-item:hover .edit-btn{opacity:1;}
+  .edit-btn:hover{color:var(--blue);}
+  .shift-btn{
+    font-size:10px;padding:2px 6px;border-radius:10px;cursor:pointer;
+    border:1px solid var(--border);background:var(--bg2);color:var(--text2);
+    font-family:inherit;opacity:0;transition:all .15s;white-space:nowrap;line-height:1.4;
+  }
+  .todo-item:hover .shift-btn{opacity:1;}
+  .shift-btn:hover{background:var(--amber-light);color:var(--amber-dark);border-color:transparent;}
+  .edit-form{flex:1;}
+  .edit-form .input-row1{display:flex;gap:8px;margin-bottom:8px;}
+  .edit-form .input-row2{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:8px;}
+  .edit-form-actions{display:flex;gap:8px;align-items:center;}
+  .save-btn{
+    background:var(--text);color:var(--bg);border:none;border-radius:var(--radius-sm);
+    padding:6px 14px;font-size:13px;font-weight:500;cursor:pointer;font-family:inherit;
+  }
+  .save-btn:hover{opacity:.8;}
+  .cancel-btn{background:none;border:none;cursor:pointer;font-size:13px;color:var(--text2);font-family:inherit;}
+  .cancel-btn:hover{color:var(--text);}
   .empty{text-align:center;padding:36px 0;color:var(--text3);font-size:14px;}
   .footer{display:flex;align-items:center;justify-content:space-between;margin-top:14px;padding-top:12px;border-top:1px solid var(--border);flex-wrap:wrap;gap:8px;}
   .footer-left{font-size:13px;color:var(--text2);display:flex;gap:12px;align-items:center;}
@@ -218,6 +243,7 @@ let todos   = [];
 let archive = [];
 let activeCat   = 'all';
 let showArchive = false;
+let editingId   = null;
 
 const catLabel  = {bundestag:'Bundestag',jura:'Jura',sonstiges:'Sonstiges'};
 const prioOrder = {hoch:0,mittel:1,niedrig:2};
@@ -308,19 +334,61 @@ function buildItem(todo, isArch) {
   const div = document.createElement('div');
   div.className = 'todo-item cat-'+cat+(todo.done?' done':'')+(isOvr?' overdue':'');
 
+  // Edit mode: show inline form
+  if (!isArch && todo.id === editingId) {
+    div.innerHTML = `
+      <div class="edit-form">
+        <div class="edit-form" style="display:flex;gap:10px;align-items:flex-start;">
+          <span class="prio-dot" style="background:${prioColor[prio]};margin-top:10px;flex-shrink:0"></span>
+          <div style="flex:1">
+            <div class="edit-form input-row1">
+              <input type="text" id="edit-text-${todo.id}" value="${esc(todo.text)}" style="flex:1" onkeydown="if(event.key==='Enter')saveEdit(${todo.id});if(event.key==='Escape')cancelEdit()">
+            </div>
+            <div class="edit-form input-row2">
+              <select id="edit-cat-${todo.id}" style="width:140px">
+                <option value="jura"       ${cat==='jura'?'selected':''}>⚖️ Jura</option>
+                <option value="bundestag"  ${cat==='bundestag'?'selected':''}>🏛 Bundestag</option>
+                <option value="sonstiges"  ${cat==='sonstiges'?'selected':''}>📌 Sonstiges</option>
+              </select>
+              <select id="edit-prio-${todo.id}" style="width:115px">
+                <option value="mittel"  ${prio==='mittel'?'selected':''}>● Mittel</option>
+                <option value="hoch"    ${prio==='hoch'?'selected':''}>🔴 Hoch</option>
+                <option value="niedrig" ${prio==='niedrig'?'selected':''}>○ Niedrig</option>
+              </select>
+              <input type="date" id="edit-date-${todo.id}" value="${todo.date||''}" style="width:145px">
+            </div>
+            <div class="edit-form-actions">
+              <button class="save-btn" onclick="saveEdit(${todo.id})">Speichern</button>
+              <button class="cancel-btn" onclick="cancelEdit()">Abbrechen</button>
+            </div>
+          </div>
+        </div>
+      </div>`;
+    setTimeout(() => {
+      const inp = document.getElementById('edit-text-'+todo.id);
+      if (inp) { inp.focus(); inp.select(); }
+    }, 0);
+    return div;
+  }
+
   const cb  = isArch ? '' : `<input class="todo-cb" type="checkbox" ${todo.done?'checked':''} onchange="toggle(${todo.id})">`;
   const dot = `<span class="prio-dot" style="background:${prioColor[prio]}" title="Priorität: ${prioLabel[prio]}"></span>`;
 
   let meta = `<span class="badge badge-${cat}">${catLabel[cat]||cat}</span>`;
   if (!isArch && prio==='hoch') meta += `<span class="badge badge-hoch">Hoch</span>`;
-  if (!isArch && db)            meta += `<span class="badge ${db.cls}">${esc(db.label)}</span>`;
+  if (!isArch && db) {
+    meta += `<span class="badge ${db.cls}">${esc(db.label)}</span>`;
+    meta += `<button class="shift-btn" onclick="shiftDate(${todo.id},1)" title="+1 Tag">+1T</button>`;
+    meta += `<button class="shift-btn" onclick="shiftDate(${todo.id},7)" title="+1 Woche">+1W</button>`;
+  }
   if (isArch && todo.completedAt) meta += `<span class="badge badge-completed">✓ ${fmt(todo.completedAt)}</span>`;
   if (todo.fileRef) meta += `<span class="badge badge-file">📎 ${esc(todo.fileRef)}</span>`;
 
   const actions = isArch
     ? `<button class="restore-btn" onclick="restore(${todo.id})" title="Wiederherstellen">↩</button>
        <button class="del-btn" onclick="removeArchive(${todo.id})" title="Löschen">✕</button>`
-    : `<button class="del-btn" onclick="remove(${todo.id})" title="Löschen">✕</button>`;
+    : `<button class="edit-btn" onclick="startEdit(${todo.id})" title="Bearbeiten">✏️</button>
+       <button class="del-btn" onclick="remove(${todo.id})" title="Löschen">✕</button>`;
 
   div.innerHTML = cb + dot +
     `<div class="todo-body">
@@ -397,6 +465,49 @@ async function addTodo() {
   } finally {
     btn.disabled = false;
     inp.focus();
+  }
+}
+
+function startEdit(id) {
+  editingId = id;
+  render();
+}
+
+function cancelEdit() {
+  editingId = null;
+  render();
+}
+
+async function saveEdit(id) {
+  const t = todos.find(x=>x.id===id);
+  if (!t) return;
+  const text = document.getElementById('edit-text-'+id).value.trim();
+  if (!text) return;
+  t.text = text;
+  t.cat  = document.getElementById('edit-cat-'+id).value;
+  t.prio = document.getElementById('edit-prio-'+id).value;
+  t.date = document.getElementById('edit-date-'+id).value || null;
+  editingId = null;
+  render();
+  try {
+    await api(`todos?id=eq.${id}`, 'PATCH', {text: t.text, cat: t.cat, prio: t.prio, date: t.date || null});
+  } catch(e) {
+    showToast('Fehler beim Speichern'); await loadData();
+  }
+}
+
+async function shiftDate(id, days) {
+  const t = todos.find(x=>x.id===id);
+  if (!t) return;
+  const d = new Date((t.date || today()) + 'T12:00:00');
+  d.setDate(d.getDate() + days);
+  t.date = d.toISOString().slice(0,10);
+  render();
+  try {
+    await api(`todos?id=eq.${id}`, 'PATCH', {date: t.date});
+    showToast(days===1 ? '+1 Tag' : '+1 Woche');
+  } catch(e) {
+    showToast('Fehler'); await loadData();
   }
 }
 

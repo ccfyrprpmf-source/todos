@@ -132,13 +132,15 @@
   }
   .todo-item:hover .edit-btn{opacity:1;}
   .edit-btn:hover{color:var(--blue);}
-  .shift-btn{
-    font-size:10px;padding:2px 6px;border-radius:10px;cursor:pointer;
-    border:1px solid var(--border);background:var(--bg2);color:var(--text2);
-    font-family:inherit;opacity:0;transition:all .15s;white-space:nowrap;line-height:1.4;
+  .date-pick-btn{
+    background:none;border:none;cursor:pointer;color:var(--text3);
+    font-size:12px;padding:0 3px;line-height:1;flex-shrink:0;
+    opacity:0;transition:opacity .15s,color .15s;
   }
-  .todo-item:hover .shift-btn{opacity:1;}
-  .shift-btn:hover{background:var(--amber-light);color:var(--amber-dark);border-color:transparent;}
+  .todo-item:hover .date-pick-btn{opacity:1;}
+  .date-pick-btn:hover{color:var(--amber);}
+  .date-pick-input{position:absolute;opacity:0;pointer-events:none;width:0;height:0;}
+  .badge-postponed{background:var(--amber-light);color:var(--amber-dark);font-size:10px;}
   .edit-form{flex:1;}
   .edit-form .input-row1{display:flex;gap:8px;margin-bottom:8px;}
   .edit-form .input-row2{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:8px;}
@@ -255,7 +257,7 @@ function fmt(d)  { const [y,m,day]=d.split('-'); return day+'.'+m+'.'+y; }
 function esc(s)  { return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
 
 function fromDb(r) {
-  return {...r, fileRef: r.file_ref, completedAt: r.completed_at};
+  return {...r, fileRef: r.file_ref, completedAt: r.completed_at, postponed: r.postponed || false};
 }
 
 function showToast(msg) {
@@ -378,9 +380,10 @@ function buildItem(todo, isArch) {
   if (!isArch && prio==='hoch') meta += `<span class="badge badge-hoch">Hoch</span>`;
   if (!isArch && db) {
     meta += `<span class="badge ${db.cls}">${esc(db.label)}</span>`;
-    meta += `<button class="shift-btn" onclick="shiftDate(${todo.id},1)" title="+1 Tag">+1T</button>`;
-    meta += `<button class="shift-btn" onclick="shiftDate(${todo.id},7)" title="+1 Woche">+1W</button>`;
+    meta += `<button class="date-pick-btn" onclick="openDatePicker(${todo.id})" title="Datum ändern">📅</button>`;
+    meta += `<input class="date-pick-input" type="date" id="dp-${todo.id}" value="${todo.date||''}" onchange="applyDateShift(${todo.id},this.value)">`;
   }
+  if (!isArch && todo.postponed) meta += `<span class="badge badge-postponed">↗ verschoben</span>`;
   if (isArch && todo.completedAt) meta += `<span class="badge badge-completed">✓ ${fmt(todo.completedAt)}</span>`;
   if (todo.fileRef) meta += `<span class="badge badge-file">📎 ${esc(todo.fileRef)}</span>`;
 
@@ -496,16 +499,24 @@ async function saveEdit(id) {
   }
 }
 
-async function shiftDate(id, days) {
+function openDatePicker(id) {
+  const inp = document.getElementById('dp-'+id);
+  if (!inp) return;
+  inp.style.pointerEvents = 'auto';
+  try { inp.showPicker(); } catch(e) { inp.click(); }
+  inp.addEventListener('blur', () => { inp.style.pointerEvents = 'none'; }, {once: true});
+}
+
+async function applyDateShift(id, newDate) {
+  if (!newDate) return;
   const t = todos.find(x=>x.id===id);
   if (!t) return;
-  const d = new Date((t.date || today()) + 'T12:00:00');
-  d.setDate(d.getDate() + days);
-  t.date = d.toISOString().slice(0,10);
+  t.date = newDate;
+  t.postponed = true;
   render();
   try {
-    await api(`todos?id=eq.${id}`, 'PATCH', {date: t.date});
-    showToast(days===1 ? '+1 Tag' : '+1 Woche');
+    await api(`todos?id=eq.${id}`, 'PATCH', {date: t.date, postponed: true});
+    showToast('Datum aktualisiert');
   } catch(e) {
     showToast('Fehler'); await loadData();
   }
